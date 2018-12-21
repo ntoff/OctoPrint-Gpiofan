@@ -1,0 +1,4 @@
+include README.md
+recursive-include octoprint_gpiofan/templates *
+recursive-include octoprint_gpiofan/translations *
+recursive-include octoprint_gpiofan/static *
