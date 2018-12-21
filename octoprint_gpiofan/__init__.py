@@ -1,37 +1,58 @@
 # coding=utf-8
 from __future__ import absolute_import
 
-### (Don't forget to remove me)
-# This is a basic skeleton for your plugin's __init__.py. You probably want to adjust the class name of your plugin
-# as well as the plugin mixins it's subclassing from. This is really just a basic skeleton to get you started,
-# defining your plugin as a template plugin, settings and asset plugin. Feel free to add or remove mixins
-# as necessary.
-#
-# Take a look at the documentation on what other plugin mixins are available.
-
+import pigpio
+from decimal import *
+import re
 import octoprint.plugin
 
-class GpiofanPlugin(octoprint.plugin.SettingsPlugin,
+class GpiofanPlugin(octoprint.plugin.StartupPlugin,
+                    octoprint.plugin.ShutdownPlugin,
+					octoprint.plugin.SettingsPlugin,
+                    octoprint.plugin.RestartNeedingPlugin,
                     octoprint.plugin.TemplatePlugin):
+
+	def __init__(self):
+		self._pigpio = pigpio.pi()
+		self._pin=0
+		
+	def on_after_startup(self):
+		self.get_settings_updates()
+		#self._pin = self._settings.getInt(["pin"])
+		self._pigpio.set_PWM_dutycycle(self._pin,0)
+		self._logger.info("BCM pin " + str(self._pin) + " is being used to mirror the fan pwm signal.")
+
+	def on_shutdown(self):
+		self._pigpio.set_PWM_dutycycle(self._pin,0)
 
 	def get_settings_defaults(self):
 		return dict(
 			pin=0
 		)
 
+	def get_template_configs(self):
+		return [
+			dict(type="settings", custom_bindings=False)
+		]
+
+	def on_settings_save(self, data):
+		s = self._settings
+		if "pin" in data.keys():
+			s.setInt(["pin"], data["pin"])
+		s.save()
+		self.get_settings_updates()
+		
+	def get_settings_updates(self):
+		self._pin=self._settings.getInt(["pin"])
+
 	def mirror_m106(self, comm_instance, phase, cmd, cmd_type, gcode, *args, **kwargs):
 		if gcode and gcode.startswith('M106'):
 			fanPwm = re.search("S(\d+\.?\d*)", cmd)
 			if fanPwm and fanPwm.group(1):
 				fanPwm = fanPwm.group(1)
-				if Decimal(fanPwm) < self.minPWM and Decimal(fanPwm) != 0:
-					self._logger.info("fan pwm value " + str(fanPwm) + " is below threshold, increasing to " + str(self.minPWM) + " (" + str(self.minSpeed) + "%)")
-	 				cmd = "M106 S" + str(self.minPWM)
-					return cmd,
-				elif Decimal(fanPwm) > self.maxPWM:
-					self._logger.info("fan pwm value " + str(fanPwm) + " is above threshold, decreasing to " + str(self.maxPWM) + " (" + str(self.maxSpeed) + "%)")
-					cmd = "M106 S" + str(self.maxPWM)
-					return cmd,
+				self._logger.info("Mirroring pwm "+ fanPwm + " to BCM " + str(self._pin))
+				self._pigpio.set_PWM_dutycycle(self._pin,Decimal(fanPwm))
+				return cmd,
 
 	def get_update_information(self):
 		return dict(
@@ -50,7 +71,8 @@ class GpiofanPlugin(octoprint.plugin.SettingsPlugin,
 			)
 		)
 
-__plugin_name__ = "Gpiofan Plugin"
+__plugin_name__ = "GPIO fan mirror"
+__plugin_description__ = " Takes the PWM value from M106 Snnn and mirrors it to the configured GPIO pin of a raspberry pi."
 
 def __plugin_load__():
 	global __plugin_implementation__
